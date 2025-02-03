@@ -1,73 +1,84 @@
-#include <stdio.h>
-#include <math.h>
-#include <stdlib.h>
 #include "pico/stdlib.h"
+#include "hardware/pio.h"
 #include "hardware/gpio.h"
-#include "hardware/timer.h"
 #include "pio_matrix.pio.h"
 #include "Leds.h"
 #include "Buttons.h"
 #include "animacao.h"
 
-#define LED_VERMELHO 11
-#define LED_AMARELO 12
-#define LED_VERDE 13
+#define LED_MATRIX_PIN 7
+#define BOTAO_A_PIN 14 // Pino do Botão A
+#define BOTAO_B_PIN 15 // Pino do Botão B
 
-#define BOTAO_INCREMENTA 14
-#define BOTAO_DECREMENTA 15
-
-// Variável para controlar o estado do LED vermelho
-bool led_vermelho_on = false;
-
-// Variável para armazenar o timer
-struct repeating_timer timer_led_vermelho;
-
-// Função de callback para piscar o LED vermelho
-bool piscar_led_vermelho_callback(struct repeating_timer *t) {
-    led_vermelho_on = !led_vermelho_on; // Inverte o estado do LED
-    gpio_put(LED_VERMELHO, led_vermelho_on); // Define o pino do LED com o novo estado
-    return true; // Continua o timer
-}
 
 int main() {
-    // Inicialização padrão do stdio
     stdio_init_all();
 
-    // Inicializa os LEDs
-    leds_init(LED_VERMELHO, LED_AMARELO, LED_VERDE);
+    // Inicialização dos botões
+    botao_init();
+    
+    // Inicialização da animação do display
+    animacao_init(pio0, 0); // Inicializa o display de 7 segmentos
 
-    // Inicializa os botões
-    buttons_init(BOTAO_INCREMENTA, BOTAO_DECREMENTA);
-
-    // Inicializa o display de 7 segmentos e o timer
-    animacao_init(pio0, 0); // Assumindo pio0 e sm 0. Adapte conforme necessário
-
-    // Configurações da PIO
-    PIO pio = pio0; // Use pio0 ou pio1 conforme necessário
+    PIO pio = pio0;
+    uint sm = 0;
     uint offset = pio_add_program(pio, &pio_matrix_program);
-    uint sm = pio_claim_unused_sm(pio, true);
-    pio_matrix_program_init(pio, sm, offset, LED_VERMELHO); // Corrigido
 
-    // Configura o timer para piscar o LED vermelho a cada 200ms (5 vezes por segundo)
-    add_repeating_timer_ms(200, piscar_led_vermelho_callback, NULL, &timer_led_vermelho);
+    pio_matrix_program_init(pio, sm, offset, LED_MATRIX_PIN);
+    pio_gpio_init(pio, LED_MATRIX_PIN);
+    pio_sm_set_consecutive_pindirs(pio, sm, LED_MATRIX_PIN, 1, true); // Configura o pino como saída
 
-    // Loop principal
+    pixel leds[PIXELS]; // Declara um array de pixels
+    float intensity = 0.5; // Define a intensidade dos LEDs
+    int led_pattern = 0; // Variável para controlar o padrão dos LEDs
+
     while (true) {
-        // Verifica se o botão de incrementar foi pressionado
-        if (button_is_pressed(BOTAO_INCREMENTA)) {
-            sleep_ms(50); // Pequeno debounce
-            animacao_incrementar_numero();
+        
+        // Verifica se o botão A foi pressionado
+        if (flag_botao_A) {
+            flag_botao_A = false; // Reseta a flag
+           if (estado_botao_A == BOTAO_PRESSIONADO){
+               led_pattern = (led_pattern + 1) % 3; // Altera o padrão de LEDs
+               animacao_incrementar_numero(); // Incrementa o número do display
+           }
         }
-
-        // Verifica se o botão de decrementar foi pressionado
-        if (button_is_pressed(BOTAO_DECREMENTA)) {
-            sleep_ms(50); // Pequeno debounce
-            animacao_decrementar_numero();
+        
+        // Verifica se o botão B foi pressionado
+         if (flag_botao_B) {
+            flag_botao_B = false; // Reseta a flag
+           if (estado_botao_B == BOTAO_PRESSIONADO){
+             led_pattern = (led_pattern == 0) ? 2: led_pattern -1; // Altera o padrão de LEDs para trás
+             animacao_decrementar_numero();// Decrementa o número do display
+           }
         }
+        
+        // Define o padrão dos LEDs
+          switch (led_pattern) {
+            case 0: // Padrão 1: LEDs vermelhos
+               for (int i = 0; i < PIXELS; i++) {
+                 leds[i].red = 255;
+                 leds[i].green = 0;
+                 leds[i].blue = 0;
+               }
+                break;
+             case 1: // Padrão 2: LEDs verdes
+                for (int i = 0; i < PIXELS; i++) {
+                    leds[i].red = 0;
+                    leds[i].green = 255;
+                    leds[i].blue = 0;
+                }
+                  break;
+             case 2: // Padrão 3: LEDs azuis
+                 for (int i = 0; i < PIXELS; i++) {
+                    leds[i].red = 0;
+                    leds[i].green = 0;
+                   leds[i].blue = 255;
+                }
+                break;
+         }
 
-        // Adiciona um pequeno delay para evitar leituras excessivas
-        sleep_ms(10);
+        draw_pio(leds, pio, sm, intensity); // Envia os dados para a matriz de LEDs
+        
     }
-
     return 0;
 }
